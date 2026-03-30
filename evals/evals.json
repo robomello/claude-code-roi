@@ -1,0 +1,67 @@
+{
+  "target_name": "cost-estimate",
+  "target_type": "skill",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Can you give me a cost estimate for my Claude usage?",
+      "expected_output": "Runs the roi.py script with default flags and presents the full report showing tokens, code output, session time, and cost comparisons",
+      "assertions": [
+        {"text": "Output contains the command 'python3 ~/skills/cost-estimate/roi.py'", "type": "binary"},
+        {"text": "Does NOT use --json, --csv, or --full flags (default report requested)", "type": "binary"},
+        {"text": "Does NOT use --days flag (full history requested by default)", "type": "binary"},
+        {"text": "Mentions reading learnings.md before executing", "type": "binary"},
+        {"text": "Does NOT mention ANTHROPIC_API_KEY or API pricing as the primary focus", "type": "binary"},
+        {"text": "Output presents or describes token breakdown, code output, and cost comparison metrics", "type": "binary"}
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Show me ROI for the last 7 days with detailed tool breakdown",
+      "expected_output": "Runs roi.py with --full and --days 7 flags to show detailed tool/agent analysis for the past week",
+      "assertions": [
+        {"text": "Command includes '--full' flag", "type": "binary"},
+        {"text": "Command includes '--days 7' flag", "type": "binary"},
+        {"text": "Command is 'python3 ~/skills/cost-estimate/roi.py --full --days 7' or equivalent with flags reordered", "type": "binary"},
+        {"text": "Mentions that --full mode is slower and parses JSONL files", "type": "binary"},
+        {"text": "Does NOT use --no-sessions flag (conflicts with wanting detailed analysis)", "type": "binary"}
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "How much code did Claude write for me? I want to share this report with my team.",
+      "expected_output": "Runs roi.py with --json flag to generate shareable JSON output showing lines of code and other metrics",
+      "assertions": [
+        {"text": "Command includes '--json' flag for shareable output", "type": "binary"},
+        {"text": "Mentions saving the JSON output to a file or provides instructions for sharing", "type": "binary"},
+        {"text": "Does NOT use --csv flag (JSON was requested for sharing)", "type": "binary"},
+        {"text": "References that LOC count comes from git commits with 'Co-Authored-By: Claude' tag", "type": "binary"},
+        {"text": "Does NOT conflate 'code written' with 'tokens used'", "type": "binary"}
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Give me a productivity report for my DashClaw repo with custom senior dev rate of $120/hr",
+      "expected_output": "Runs roi.py with --repo flag pointing to DashClaw directory and --senior-rate 120 for custom benchmark",
+      "assertions": [
+        {"text": "Command includes '--repo ~/DashClaw' or similar path to DashClaw", "type": "binary"},
+        {"text": "Command includes '--senior-rate 120'", "type": "binary"},
+        {"text": "Does NOT include --subscription or --senior-loc flags unless user requested them", "type": "binary"},
+        {"text": "Command is 'python3 ~/skills/cost-estimate/roi.py --repo ~/DashClaw --senior-rate 120' or equivalent", "type": "binary"},
+        {"text": "Does NOT attempt to calculate repo-specific stats manually", "type": "binary"}
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "What's the current pricing for Claude API tokens?",
+      "expected_output": "Does NOT trigger the cost-estimate skill; answers the question directly using knowledge or reads pricing-reference.md",
+      "assertions": [
+        {"text": "Does NOT execute 'python3 ~/skills/cost-estimate/roi.py'", "type": "binary"},
+        {"text": "Does NOT trigger the cost-estimate skill activation", "type": "binary"},
+        {"text": "Response mentions API pricing (e.g., Opus $15/$75 per 1M tokens in/out)", "type": "binary"},
+        {"text": "May reference '/home/mello/skills/cost-estimate/references/pricing-reference.md' for current pricing", "type": "binary"},
+        {"text": "Does NOT analyze Roberto's actual usage or ROI", "type": "binary"}
+      ]
+    }
+  ]
+}

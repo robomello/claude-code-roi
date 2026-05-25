@@ -47,6 +47,10 @@ FILE_HISTORY_DIR = HOME / ".claude" / "file-history"
 # Skip these dirs when scanning for repos
 SKIP_DIRS = [".nvm", "node_modules", "ai-toolkit", "gpu-burn", ".cache", ".local"]
 
+# Default author patterns -- filters Claude commits to those authored by the
+# user, excluding work from cloned third-party repos. Override with --author.
+MY_AUTHOR_PATTERNS = ["robomello", "mello@synai", "mbot@mercedes"]
+
 # Token pricing per 1M tokens (March 2026 API rates)
 TOKEN_PRICES = {
     "claude-opus-4-6":            {"input": 15.0,  "output": 75.0,  "cache_read": 1.5,  "cache_create": 18.75},
@@ -110,13 +114,15 @@ def discover_repos():
     return sorted(repos)
 
 
-def get_claude_commits(repo_path, since_date=None, until_date=None):
-    """Get all Claude-authored commits with LOC stats."""
+def get_claude_commits(repo_path, since_date=None, until_date=None, authors=None):
+    """Get all Claude-authored commits with LOC stats, filtered by author."""
     cmd = [
         "git", "-C", repo_path, "log", "--all",
         "--grep=Co-Authored-By: Claude",
         "--shortstat", "--format=%H|%ai|%s"
     ]
+    for pattern in authors or []:
+        cmd.append(f"--author={pattern}")
     if since_date:
         cmd.append(f"--since={since_date}")
     if until_date:
@@ -179,13 +185,15 @@ def get_claude_commits(repo_path, since_date=None, until_date=None):
     return commits
 
 
-def get_file_types(repo_path, since_date=None, until_date=None):
-    """Get file type breakdown for Claude commits."""
+def get_file_types(repo_path, since_date=None, until_date=None, authors=None):
+    """Get file type breakdown for Claude commits, filtered by author."""
     cmd = [
         "git", "-C", repo_path, "log", "--all",
         "--grep=Co-Authored-By: Claude",
         "--numstat", "--format="
     ]
+    for pattern in authors or []:
+        cmd.append(f"--author={pattern}")
     if since_date:
         cmd.append(f"--since={since_date}")
     if until_date:
@@ -320,6 +328,55 @@ def calculate_session_time(days=None, since_date=None, until_date=None):
         "active_sessions": session_count,
         "sessions_analyzed": sessions_analyzed,
     }
+
+
+def get_activity_date_range():
+    """
+    Earliest/latest Claude Code activity from non-git sources (JSONL session
+    mtimes + stats-cache.json). Used to widen the report window when commits
+    lack the "Co-Authored-By: Claude" trailer.
+    Returns (earliest, latest) as naive datetimes, or (None, None).
+    """
+    earliest = latest = None
+
+    if PROJECTS_DIR.exists():
+        for jf in PROJECTS_DIR.rglob("*.jsonl"):
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(jf))
+            except OSError:
+                continue
+            if earliest is None or mtime < earliest:
+                earliest = mtime
+            if latest is None or mtime > latest:
+                latest = mtime
+
+    stats = load_stats_cache()
+    if stats:
+        first_session = stats.get("firstSessionDate")
+        if first_session:
+            try:
+                d = datetime.fromisoformat(
+                    first_session.replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+                if earliest is None or d < earliest:
+                    earliest = d
+            except ValueError:
+                pass
+
+        for entry in stats.get("dailyActivity", []):
+            date_str = entry.get("date")
+            if not date_str:
+                continue
+            try:
+                d = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                continue
+            if earliest is None or d < earliest:
+                earliest = d
+            if latest is None or d > latest:
+                latest = d
+
+    return earliest, latest
 
 
 # -- Token & Cost Analysis ----------------------------------------------------
@@ -687,8 +744,9 @@ def generate_report(args):
     repo_stats = {}
     all_file_types = defaultdict(lambda: {"added": 0, "removed": 0})
 
+    authors = args.author or MY_AUTHOR_PATTERNS
     for repo in repos:
-        commits = get_claude_commits(repo, since_date, until_date)
+        commits = get_claude_commits(repo, since_date, until_date, authors)
         if commits:
             total_ins = sum(c["insertions"] for c in commits)
             total_del = sum(c["deletions"] for c in commits)
@@ -704,7 +762,7 @@ def generate_report(args):
             }
             all_commits.extend(commits)
 
-            ft = get_file_types(repo, since_date, until_date)
+            ft = get_file_types(repo, since_date, until_date, authors)
             for ext, counts in ft.items():
                 all_file_types[ext]["added"] += counts["added"]
                 all_file_types[ext]["removed"] += counts["removed"]
@@ -727,9 +785,22 @@ def generate_report(args):
     if dates:
         first_date = min(dates)
         last_date = max(dates)
-        calendar_days = (last_date - first_date).days + 1
     else:
         first_date = last_date = None
+
+    # Widen window with non-git activity (JSONL mtimes + stats-cache) when no
+    # explicit date filter is set. Catches periods where commits lack the
+    # "Co-Authored-By: Claude" trailer (e.g. attribution disabled).
+    if not since_date and not args.days:
+        act_first, act_last = get_activity_date_range()
+        if act_first and (first_date is None or act_first < first_date):
+            first_date = act_first
+        if act_last and (last_date is None or act_last > last_date):
+            last_date = act_last
+
+    if first_date and last_date:
+        calendar_days = (last_date - first_date).days + 1
+    else:
         calendar_days = 1
 
     # -- Session timing --
@@ -1214,6 +1285,9 @@ Examples:
                         help=f"Monthly cost (default: ${CLAUDE_MONTHLY_COST})")
     parser.add_argument("--no-sessions", action="store_true",
                         help="Skip JSONL session analysis (faster)")
+    parser.add_argument("--author", action="append", metavar="PATTERN",
+                        help=f"Filter commits to author (repeatable). "
+                             f"Default: {', '.join(MY_AUTHOR_PATTERNS)}")
 
     args = parser.parse_args()
 
